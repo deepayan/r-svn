@@ -86,9 +86,10 @@ Stangle(file, driver = Rtangle(),
   If \code{syntax = NULL} (the default) then the available syntax
   objects are consulted in turn, and selected if their \code{extension}
   component matches (as a regexp) the file name.  Objects
-  \code{\link{SweaveSyntaxNoweb}} (with \code{extension = "[.][rsRS]nw$"}) and
-  \code{\link{SweaveSyntaxLatex}} (with \code{extension = "[.][rsRS]tex$"}) are
-  supplied, but users or packages can supply others with names matching
+  \code{\link{SweaveSyntaxNoweb}} (with \code{extension = "[.][rsRS]nw$"}),
+  \code{\link{SweaveSyntaxLatex}} (with \code{extension = "[.][rsRS]tex$"}), and
+  \code{\link{SweaveSyntaxTexinfo}} (with \code{extension = "[.][rsRS]?texi$"})
+  are supplied, but users or packages can supply others with names matching
   the pattern \samp{SweaveSyntax.*}.
 }
 
@@ -104,7 +105,7 @@ Stangle(file, driver = Rtangle(),
   \sQuote{\href{../doc/Sweave.pdf}{Sweave User Manual}}, a vignette in
   the \pkg{utils} package.
 
-  \code{\link{RweaveLatex}}, \code{\link{Rtangle}}.
+  \code{\link{RweaveLatex}}, \code{\link{RweaveTexinfo}}, \code{\link{Rtangle}}.
   Alternative Sweave drivers are in, for example, packages
   \pkg{weaver} (Bioconductor), \CRANpkg{R2HTML}, and \CRANpkg{ascii}.
 

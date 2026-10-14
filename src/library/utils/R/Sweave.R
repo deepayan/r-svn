@@ -219,8 +219,11 @@ SweaveReadFile <- function(file, syntax, encoding = "")
         enc <- tools:::.getVignetteEncoding(text,
 			    default = if (identical(encoding, "")) NA else encoding)
         if (enc == "non-ASCII") {
-            enc <- if (nzchar(encoding)) {
-                encoding
+            poss <- grep("^[[:space:]]*@documentencoding[[:space:]]+([[:alnum:]-]+)", text, useBytes = TRUE)
+            if (length(poss)) {
+                enc <- sub("^[[:space:]]*@documentencoding[[:space:]]+([[:alnum:]-]+).*", "\\1", text[poss[1L]])
+            } else if (nzchar(encoding)) {
+                enc <- encoding
             } else {
                 stop(sQuote(basename(file)),
                         " is not ASCII and does not declare an encoding",
@@ -325,6 +328,26 @@ SweaveSyntaxLatex$trans$code <- "\\\\begin{Scode}{\\1}"
 SweaveSyntaxLatex$trans$coderef <- "\\\\Scoderef{\\1}"
 SweaveSyntaxLatex$trans$syntaxname <- "\\\\SweaveSyntax{SweaveSyntaxLatex}"
 SweaveSyntaxLatex$trans$extension <- ".Stex"
+
+SweaveSyntaxTexinfo <- SweaveSyntaxNoweb
+SweaveSyntaxTexinfo$doc <- "^[[:space:]]*@end[[:space:]]+Scode"
+SweaveSyntaxTexinfo$code <- "^[[:space:]]*@Scode\\{?([^}]*)\\}?.*"
+SweaveSyntaxTexinfo$coderef <- "^[[:space:]]*(?:@Scoderef\\{|<<)([^}>]+)(?:\\}|>>).*"
+SweaveSyntaxTexinfo$docopt <- "^[[:space:]]*@SweaveOpts\\{([^}]*)\\}"
+SweaveSyntaxTexinfo$docexpr <- "@Sexpr\\{([^}]*)\\}"
+SweaveSyntaxTexinfo$extension <- "\\.[rsRS]?texi$"
+SweaveSyntaxTexinfo$syntaxname <- "^[[:space:]]*@SweaveSyntax\\{([^}]*)\\}"
+SweaveSyntaxTexinfo$input <- "^[[:space:]]*@SweaveInput\\{([^}]*)\\}"
+
+SweaveSyntaxTexinfo$trans$doc <- "@end Scode"
+SweaveSyntaxTexinfo$trans$code <- "@Scode{\\1}"
+SweaveSyntaxTexinfo$trans$coderef <- "@Scoderef{\\1}"
+SweaveSyntaxTexinfo$trans$docopt <- "@SweaveOpts{\\1}"
+SweaveSyntaxTexinfo$trans$docexpr <- "@Sexpr{\\1}"
+SweaveSyntaxTexinfo$trans$syntaxname <- "@SweaveSyntax{SweaveSyntaxTexinfo}"
+SweaveSyntaxTexinfo$trans$extension <- ".Stexi"
+SweaveSyntaxTexinfo$trans$input <- "@SweaveInput{\\1}"
+
 
 SweaveGetSyntax <- function(file)
 {

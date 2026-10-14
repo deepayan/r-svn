@@ -906,3 +906,575 @@ RtangleOptions <- function(options)
     options
 }
 
+###------------------------------------------------------------------------
+### Texinfo Driver
+###------------------------------------------------------------------------
+
+RweaveTexinfo <- function()
+{
+    list(setup = RweaveTexinfoSetup,
+         runcode = RweaveTexinfoRuncode,
+         writedoc = RweaveTexinfoWritedoc,
+         finish = RweaveTexinfoFinish,
+         checkopts = RweaveTexinfoOptions)
+}
+
+RweaveTexinfoSetup <-
+    function(file, syntax, output = NULL, quiet = FALSE, debug = FALSE,
+             ...)
+{
+    dots <- list(...)
+    if (is.null(output)) {
+        prefix.string <- basename(sub(syntax$extension, "", file))
+        output <- paste0(prefix.string, ".texi")
+    } else prefix.string <- basename(sub("\\.texi$", "", output))
+
+    if (!quiet) cat("Writing to file ", output, "\n",
+                   "Processing code chunks with options ...\n", sep = "")
+    encoding <- attr(file, "encoding")
+    if (encoding %in% c("ASCII", "bytes")) encoding <- ""
+    output <- file(output, open = "w", encoding = encoding)
+
+    options <- list(prefix = TRUE, prefix.string = prefix.string,
+                    engine = "R", print = FALSE, eval = TRUE, fig = FALSE,
+                    pdf = TRUE, eps = FALSE, png = TRUE, jpeg = FALSE,
+                    grdevice = "", width = 6, height = 6, resolution = 300,
+                    term = TRUE, echo = TRUE, keep.source = TRUE,
+                    results = "verbatim",
+                    split = FALSE, strip.white = TRUE, include = TRUE,
+                    pdf.version = grDevices::pdf.options()$version,
+                    pdf.encoding = grDevices::pdf.options()$encoding,
+                    pdf.compress = grDevices::pdf.options()$compress,
+                    expand = TRUE,
+                    concordance = FALSE, figs.only = TRUE,
+                    ignore.on.weave = FALSE, ignore = FALSE,
+                    example.env = "example",
+                    escape = TRUE,
+                    stop.on.error = TRUE,
+                    image.width = "",
+                    image.height = "",
+                    image.center = FALSE,
+                    image.ifnotinfo = FALSE)
+    options$.defaults <- options
+    if (!is.null(dots$weave))
+        dots$ignore.on.weave <- !dots$weave
+    options[names(dots)] <- dots
+
+    options <- RweaveTexinfoOptions(options)
+
+    list(output = output,
+         debug = debug, quiet = quiet,
+         syntax = syntax, options = options,
+         chunkout = list(),
+         srclines = integer(),
+         linesout = integer(),
+         filenumout = integer())
+}
+
+escapeTexinfo <- function(x)
+{
+    protect_tags <- c("r", "code", "emph", "strong", "dots", "var", "kbd", "samp", "url", "uref")
+    tag_re <- paste0("@(", paste(protect_tags, collapse = "|"), ")\\{([^}]*)\\}")
+
+    vapply(x, function(s) {
+        if (!nzchar(s)) return(s)
+        m <- gregexpr(tag_re, s)
+        matches <- regmatches(s, m)[[1L]]
+        if (length(matches)) {
+            for (i in seq_along(matches)) {
+                tok <- paste0("\001TAG", i, "\002")
+                s <- sub(tag_re, tok, s)
+            }
+        }
+        s <- gsub("@@", "\001ATAT\002", s, fixed = TRUE)
+        s <- gsub("@", "@@", s, fixed = TRUE)
+        s <- gsub("\001ATAT\002", "@@", s, fixed = TRUE)
+        s <- gsub("{", "@{", s, fixed = TRUE)
+        s <- gsub("}", "@}", s, fixed = TRUE)
+        if (length(matches)) {
+            for (i in seq_along(matches)) {
+                tok <- paste0("\001TAG", i, "\002")
+                s <- sub(tok, matches[i], s, fixed = TRUE)
+            }
+        }
+        s
+    }, FUN.VALUE = character(1L), USE.NAMES = FALSE)
+}
+
+makeRweaveTexinfoCodeRunner <- function(evalFunc = RweaveEvalWithOpt)
+{
+    function(object, chunk, options) {
+        pdf.Swd <- function(name, width, height, ...)
+            grDevices::pdf(file = paste0(chunkprefix, ".pdf"),
+                           width = width, height = height,
+                           version = options$pdf.version,
+                           encoding = options$pdf.encoding,
+                           compress = options$pdf.compress)
+        eps.Swd <- function(name, width, height, ...)
+            grDevices::postscript(file = paste0(name, ".eps"),
+                                  width = width, height = height,
+                                  paper = "special", horizontal = FALSE)
+        png.Swd <- function(name, width, height, options, ...)
+            grDevices::png(filename = paste0(chunkprefix, ".png"),
+                           width = width, height = height,
+                           res = options$resolution, units = "in")
+        jpeg.Swd <- function(name, width, height, options, ...)
+            grDevices::jpeg(filename = paste0(chunkprefix, ".jpeg"),
+                            width = width, height = height,
+                            res = options$resolution, units = "in")
+
+        if (!is.null(options$weave))
+            options$ignore.on.weave <- !options$weave
+        if (options$ignore.on.weave || options$ignore ||
+            !(options$engine %in% c("R", "S")))
+            return(object)
+
+        devs <- devoffs <- list()
+        if (options$fig && options$eval) {
+            if (options$pdf) {
+                devs <- c(devs, list(pdf.Swd))
+                devoffs <- c(devoffs, list(grDevices::dev.off))
+            }
+            if (options$eps) {
+                devs <- c(devs, list(eps.Swd))
+                devoffs <- c(devoffs, list(grDevices::dev.off))
+            }
+            if (options$png) {
+                devs <- c(devs, list(png.Swd))
+                devoffs <- c(devoffs, list(grDevices::dev.off))
+            }
+            if (options$jpeg) {
+                devs <- c(devs, list(jpeg.Swd))
+                devoffs <- c(devoffs, list(grDevices::dev.off))
+            }
+            if(nzchar(grd <- options$grdevice)) {
+                grdo <- paste0(grd, ".off")
+                if(grepl("::", grd, fixed = TRUE)) {
+                    devs <- c(devs, eval(str2expression(grd)))
+                    devoffs <-
+                        c(devoffs,
+                          if(!inherits(grdo <- tryCatch(eval(str2expression(grdo)), error = identity),
+                                       "error"))
+                              list(grdo)
+                          else
+                              list(grDevices::dev.off))
+                } else {
+                    devs <- c(devs, list(get(grd, envir = .GlobalEnv)))
+                    devoffs <-
+                        c(devoffs,
+                          if(exists(grdo, envir = .GlobalEnv))
+                              list(get(grdo, envir = .GlobalEnv))
+                          else
+                              list(grDevices::dev.off))
+                }
+            }
+        }
+        if (!object$quiet) {
+            cat(formatC(options$chunknr, width = 2), ":")
+            if (options$echo) cat(" echo")
+            if (options$keep.source) cat(" keep.source")
+            if (options$eval) {
+                if (options$print) cat(" print")
+                if (options$term) cat(" term")
+                cat("", options$results)
+                if (options$fig) {
+                    if (options$eps) cat(" eps")
+                    if (options$pdf) cat(" pdf")
+                    if (options$png) cat(" png")
+                    if (options$jpeg) cat(" jpeg")
+                    if (!is.null(options$grdevice)) cat("", options$grdevice)
+                }
+            }
+            cat(" (")
+            if (!is.null(options$label))
+                cat("label = ", options$label, ", ", sep = "")
+            filenum <- attr(chunk, "srcFilenum")[1]
+            filename <- attr(chunk, "srcFilenames")[filenum]
+            cat(basename(filename), ":", attr(chunk, "srclines")[1], ")", sep = "")
+            cat("\n")
+        }
+
+        chunkprefix <- RweaveChunkPrefix(options)
+
+        if (options$split) {
+            chunkout <- object$chunkout[chunkprefix][[1L]]
+            if (is.null(chunkout)) {
+                chunkout <- file(paste0(chunkprefix, ".texi"), "w")
+                if (!is.null(options$label))
+                    object$chunkout[[chunkprefix]] <- chunkout
+                if(!grepl(.SweaveValidFilenameRegexp, chunkout))
+                    warning("file stem ", sQuote(chunkout), " is not portable",
+                            call. = FALSE, domain = NA)
+            }
+        } else chunkout <- object$output
+
+        srcfile <- srcfilecopy(object$filename, chunk, isFile = TRUE)
+
+        chunkexps <- try(parse(text = chunk, srcfile = srcfile), silent = TRUE)
+        if (inherits(chunkexps, "try-error"))
+            chunkexps[1L] <- sub(" parse(text = chunk, srcfile = srcfile) : \n ",
+                                 "", chunkexps[1L], fixed = TRUE)
+
+        RweaveTryStop(chunkexps, options)
+
+        putSinput <- function(dce, leading) {
+            if (!openExample) {
+                cat("@", options$example.env, "\n", sep = "", file = chunkout)
+                linesout[thisline + 1L] <<- srcline
+                filenumout[thisline + 1L] <<- srcfilenum
+                thisline <<- thisline + 1L
+                openExample <<- TRUE
+            }
+            if (isTRUE(options$escape))
+                dce <- escapeTexinfo(dce)
+            leading <- max(leading, 1L)
+            cat(paste0(getOption("prompt"), dce[seq_len(leading)],
+                       collapse = "\n"),
+                file = chunkout, sep = "")
+            cat("\n", file = chunkout)
+            if (length(dce) > leading) {
+                cat(paste0(getOption("continue"), dce[-seq_len(leading)],
+                           collapse = "\n"),
+                    file = chunkout, sep = "")
+                cat("\n", file = chunkout)
+            }
+            linesout[thisline + seq_along(dce)] <<- srcline
+            filenumout[thisline + seq_along(dce)] <<- srcfilenum
+            thisline <<- thisline + length(dce)
+        }
+
+        trySrcLines <- function(srcfile, showfrom, showto, ce) {
+	    tryCatch(suppressWarnings(getSrcLines(srcfile, showfrom, showto)),
+                     error = function(e) {
+                         if (is.null(ce)) character()
+                         else deparse(ce, width.cutoff = 0.75*getOption("width"))
+                     })
+        }
+
+        echoComments <- function(showto) {
+            if (options$echo && !is.na(lastshown) && lastshown < showto) {
+                dce <- trySrcLines(srcfile, lastshown + 1L, showto, NULL)
+                linedirs <- startsWith(dce, "#line ")
+		dce <- dce[!linedirs]
+		if (length(dce))
+                    putSinput(dce, length(dce))
+                lastshown <<- showto
+            }
+        }
+
+        openExample <- FALSE
+
+        srclines <- attr(chunk, "srclines")
+        srcfilenums <- attr(chunk, "srcFilenum")
+        linesout <- integer()
+        filenumout <- integer()
+        srcline <- srclines[1L]
+        srcfilenum <- srcfilenums[1L]
+        thisline <- 0L
+        lastshown <- 0L
+        leading <- 1L
+
+        srcrefs <- attr(chunkexps, "srcref")
+
+        if (length(devs)) {
+            if(!grepl(.SweaveValidFilenameRegexp, chunkprefix))
+                warning("file stem ", sQuote(chunkprefix), " is not portable",
+                        call. = FALSE, domain = NA)
+            if (options$figs.only)
+                devs[[1L]](name = chunkprefix,
+                           width = options$width, height = options$height,
+                           options)
+        }
+        SweaveHooks(options, run = TRUE)
+
+        for (nce in seq_along(chunkexps)) {
+            ce <- chunkexps[[nce]]
+            if (options$keep.source && nce <= length(srcrefs) &&
+                !is.null(srcref <- srcrefs[[nce]])) {
+                showfrom <- srcref[7L]
+                showto <- srcref[8L]
+
+                dce <- trySrcLines(srcfile, lastshown+1L, showto, ce)
+                leading <- showfrom - lastshown
+
+                lastshown <- showto
+                srcline <- srcref[3L]
+
+                linedirs <- startsWith(dce, "#line ")
+                dce <- dce[!linedirs]
+                leading <- leading - sum(linedirs[seq_len(leading)])
+
+                while (length(dce) && length(grep("^[[:blank:]]*$", dce[1L]))) {
+                    dce <- dce[-1L]
+                    leading <- leading - 1L
+                }
+            } else {
+                dce <- deparse(ce, width.cutoff = 0.75*getOption("width"))
+                leading <- 1L
+            }
+            if (object$debug)
+                cat("\nRtexi> ", paste(dce, collapse = "\n+  "),"\n")
+
+            if (options$echo && length(dce)) putSinput(dce, leading)
+
+            if (options$eval) {
+                tmpcon <- file()
+                sink(file = tmpcon)
+                err <- tryCatch(evalFunc(ce, options), finally = {
+                     cat("\n")
+                     sink()
+                })
+                output <- readLines(tmpcon)
+                close(tmpcon)
+                if (length(output) == 1L && !nzchar(output[1L])) output <- NULL
+                if (inherits(err, "try-error")) {
+                    if (isTRUE(options$stop.on.error)) {
+                        RweaveTryStop(err, options)
+                    } else {
+                        errmsg <- conditionMessage(attr(err, "condition")) %||% as.character(err)
+                        output <- c(output, paste("Error:", errmsg))
+                    }
+                }
+            } else output <- NULL
+
+            if (length(output) && object$debug)
+                cat(paste(output, collapse = "\n"))
+
+            if (length(output) && (options$results != "hide")) {
+                if (options$results == "texinfo") {
+                    if (openExample) {
+                        cat("@end ", options$example.env, "\n", sep = "", file = chunkout)
+                        linesout[thisline + 1L] <- srcline
+                        filenumout[thisline + 1L] <- srcfilenum
+                        thisline <- thisline + 1L
+                        openExample <- FALSE
+                    }
+                    output <- paste(output, collapse = "\n")
+                    cat(output, "\n", file = chunkout, sep = "")
+                    count <- sum(strsplit(output, NULL)[[1L]] == "\n") + 1L
+                    if (count > 0L) {
+                        linesout[thisline + seq_len(count)] <- srcline
+                        filenumout[thisline + seq_len(count)] <- srcfilenum
+                        thisline <- thisline + count
+                    }
+                } else {
+                    if (!openExample) {
+                        cat("@", options$example.env, "\n", sep = "", file = chunkout)
+                        linesout[thisline + 1L] <- srcline
+                        filenumout[thisline + 1L] <- srcfilenum
+                        thisline <- thisline + 1L
+                        openExample <- TRUE
+                    }
+                    if (isTRUE(options$escape))
+                        output <- escapeTexinfo(output)
+
+                    output <- paste(output, collapse = "\n")
+                    if (!isFALSE(options$strip.white)) {
+                        output <- sub("^[[:space:]]*\n", "", output)
+                        output <- sub("\n[[:space:]]*$", "", output)
+                        if (options$strip.white == "all")
+                            output <- sub("\n[[:space:]]*\n", "\n", output)
+                    }
+                    cat(output, "\n", file = chunkout, sep = "")
+                    count <- sum(strsplit(output, NULL)[[1L]] == "\n") + 1L
+                    if (count > 0L) {
+                        linesout[thisline + seq_len(count)] <- srcline
+                        filenumout[thisline + seq_len(count)] <- srcfilenum
+                        thisline <- thisline + count
+                    }
+                }
+                remove(output)
+            }
+        }
+
+        if (options$keep.source) echoComments(length(srcfile$lines))
+
+        if (openExample) {
+            cat("@end ", options$example.env, "\n", sep = "", file = chunkout)
+            linesout[thisline + 1L] <- srcline
+            filenumout[thisline + 1L] <- srcfilenum
+            thisline <- thisline + 1L
+            openExample <- FALSE
+        }
+
+        if (is.null(options$label) && options$split) close(chunkout)
+
+        if (options$split && options$include) {
+            cat("@include ", chunkprefix, ".texi\n", sep = "", file = object$output)
+            linesout[thisline + 1L] <- srcline
+            filenumout[thisline + 1L] <- srcfilenum
+            thisline <- thisline + 1L
+        }
+
+        if (length(devs)) {
+            if (options$figs.only) devoffs[[1L]]()
+            for (i in seq_along(devs)) {
+                if (options$figs.only && i == 1) next
+                devs[[i]](name = chunkprefix, width = options$width,
+                          height = options$height, options)
+                err <- tryCatch({
+                    SweaveHooks(options, run = TRUE)
+                    eval(chunkexps, envir = .GlobalEnv)
+                }, error = function(e) {
+                    devoffs[[i]]()
+                    stop(conditionMessage(e), call. = FALSE, domain = NA)
+                })
+                devoffs[[i]]()
+            }
+
+            if (options$include) {
+                imgargs <- chunkprefix
+                if (nzchar(options$image.width))
+                    imgargs <- paste0(imgargs, ",", options$image.width)
+                else if (nzchar(options$image.height))
+                    imgargs <- paste0(imgargs, ",,", options$image.height)
+
+                imgcmd <- paste0("@image{", imgargs, "}\n")
+                if (isTRUE(options$image.center))
+                    imgcmd <- paste0("@center ", imgcmd)
+                if (isTRUE(options$image.ifnotinfo))
+                    imgcmd <- paste0("@ifnotinfo\n", imgcmd, "@end ifnotinfo\n")
+
+                cat(imgcmd, file = object$output)
+                linesout[thisline + 1L] <- srcline
+                filenumout[thisline + 1L] <- srcfilenum
+                thisline <- thisline + 1L
+            }
+        }
+        object$linesout <- c(object$linesout, linesout)
+        object$filenumout <- c(object$filenumout, filenumout)
+        object
+    }
+}
+
+RweaveTexinfoRuncode <- makeRweaveTexinfoCodeRunner()
+
+RweaveTexinfoWritedoc <- function(object, chunk)
+{
+    linesout <- attr(chunk, "srclines")
+    filenumout <- attr(chunk, "srcFilenum")
+
+    while(length(pos <- grep(object$syntax$docexpr, chunk)))
+    {
+        cmdloc <- regexpr(object$syntax$docexpr, chunk[pos[1L]])
+        cmd <- substr(chunk[pos[1L]], cmdloc,
+                      cmdloc + attr(cmdloc, "match.length") - 1L)
+        cmd <- sub(object$syntax$docexpr, "\\1", cmd)
+        if (object$options$eval) {
+            val <- tryCatch(as.character(eval(str2expression(cmd), envir = .GlobalEnv)),
+		    error = function(e) {
+	               filenum <- attr(chunk, "srcFilenum")[pos[1L]]
+                       filename <- attr(chunk, "srcFilenames")[filenum]
+                       location <- paste0(basename(filename), ":", attr(chunk, "srclines")[pos[1L]])
+		       stop("at ", location, ", ", conditionMessage(e), domain = NA, call. = FALSE)
+		   })
+            if (length(val) == 0L) val <- ""
+            if (isTRUE(object$options$escape))
+                val <- escapeTexinfo(val)
+        }
+        else val <- paste0("@code{<<", cmd, ">>}")
+
+        chunk[pos[1L]] <- sub(object$syntax$docexpr, val, chunk[pos[1L]])
+    }
+
+    while(length(pos <- grep(object$syntax$docopt, chunk)))
+    {
+        opts <- sub(paste0(".*", object$syntax$docopt, ".*"),
+                    "\\1", chunk[pos[1L]])
+        object$options <- SweaveParseOptions(opts, object$options,
+                                             RweaveTexinfoOptions)
+        chunk[pos[1L]] <- sub(object$syntax$docopt, "", chunk[pos[1L]])
+    }
+
+    cat(chunk, sep = "\n", file = object$output)
+    object$linesout <- c(object$linesout, linesout)
+    object$filenumout <- c(object$filenumout, filenumout)
+
+    object
+}
+
+RweaveTexinfoFinish <- function(object, error = FALSE)
+{
+    outputname <- summary(object$output)$description
+    if (!object$quiet && !error) {
+	if(!file.exists(outputname))
+	    stop(gettextf("the output file '%s' has disappeared", outputname))
+	cat("\n",
+	    sprintf("You can now run makeinfo or texi2pdf on %s", sQuote(outputname)),
+	    "\n", sep = "")
+    }
+    close(object$output)
+    if (length(object$chunkout))
+        for (con in object$chunkout) close(con)
+    invisible(outputname)
+}
+
+RweaveTexinfoOptions <- function(options)
+{
+    defaults <- options[[".defaults"]]
+
+    c2l <- function(x)
+        if (is.logical(x))
+            x
+        else if (is.null(x))
+            FALSE
+        else
+            suppressWarnings(as.logical(get0(x, mode = "logical") %||% x))
+
+    c2n <- function(x)
+        if (is.numeric(x))
+            x
+        else
+            suppressWarnings(as.numeric(get0(x, mode = "numeric") %||% x))
+
+    NUMOPTS <- c("width", "height", "resolution")
+
+    CHAROPTS <- c("results", "prefix.string", "engine", "label",
+                  "strip.white", "pdf.version", "pdf.encoding", "grdevice",
+                  "example.env", "image.width", "image.height")
+
+    for (opt in names(options)) {
+        if(opt == ".defaults") next
+        oldval <- options[[opt]]
+        defval <- defaults[[opt]]
+        if(opt %in% CHAROPTS || is.character(defval)) {
+        } else if(is.logical(defval)) {
+            if(!is.logical(oldval)) options[[opt]] <- c2l(oldval)
+        } else if(opt %in% NUMOPTS || is.numeric(defval)) {
+            if(!is.numeric(oldval)) options[[opt]] <- c2n(oldval)
+        } else if(!is.na(newval <- c2l(oldval)))
+            options[[opt]] <- newval
+        else if(!is.na(newval <- c2n(oldval)))
+            options[[opt]] <- newval
+        if (is.na(options[[opt]]))
+            stop(gettextf("invalid value for %s : %s", sQuote(opt), oldval),
+                 domain = NA)
+    }
+
+    if (!is.null(options$results)) {
+        res <- as.character(options$results)
+        if(tolower(res) != res)
+            warning("value of option 'results' should be lowercase",
+                    call. = FALSE)
+        options$results <- tolower(res)
+    }
+    options$results <- match.arg(options$results, c("verbatim", "texinfo", "hide"))
+
+    options$strip.white <-
+        if (is.null(options$strip.white))
+            TRUE
+        else if (!is.na(newval <- suppressWarnings(as.logical(options$strip.white))))
+            newval
+        else {
+            res <- as.character(options$strip.white)
+            if(tolower(res) != res)
+                warning("value of option 'strip.white' should be lowercase",
+                        call. = FALSE)
+            res <- match.arg(tolower(res), c("true", "false", "all"))
+            if (res != "all") as.logical(res) else res
+        }
+
+    options
+}
+
+
