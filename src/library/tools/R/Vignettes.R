@@ -1290,7 +1290,7 @@ vignetteEngine <- local({
                          domain = NA)
             }
             if (is.null(pattern))
-                pattern <- "[.][rRsS](nw|tex)$"
+                pattern <- "[.][rRsS](nw|tex|texi)$"
             else if (!is.character(pattern))
                 stop(gettextf("Argument %s must be a character vector or NULL and not %s",
                               sQuote("pattern"), sQuote(class(pattern)[1L])),
