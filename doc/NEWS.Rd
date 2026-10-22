@@ -115,6 +115,10 @@
       shortcutting \code{diag(chol2inv(.))}, wished for with a patch and
       reproducible analysis in \PR{19177} by \I{Adam Marstrand}.
 
+      \item Dynamic HTML help pages are postprocessed to link function
+      arguments in the Usage section to their documentation in the
+      Arguments section.
+
     }
   }
 
@@ -169,6 +173,17 @@
 
   \subsection{Bug Fixes}{
     \itemize{
+      \item The internal method of \code{untar()} now checks the whole path
+      of every member, so that a final component of \code{".."} or \code{"~"}
+      can no longer place a link or file outside the extraction directory;
+      rejects hard- and symbolic-link targets restored as file copies,
+      which resolve outside the extraction directory or pass through a
+      symbolic link; applies the umask to extracted files; also no longer
+      restores \abbr{setuid} or \abbr{setgid} permission bits.
+      Similarly, the internal method of \code{unzip()} no longer extracts
+      through symbolic links below \code{exdir}, both thanks to \I{Kevin
+      Ushey}'s report and patch in \PR{19229}.
+
       \item For \code{x <-  <large-POSIXlt>}, for some boundary cases
       with \code{x$sec - floor(x$sec)} close to 1, \code{c(x)} could
       become one second ahead of \code{x} in \R 4.6.0;  \I{subassignments}
@@ -362,16 +377,33 @@
       inside a masked \code{viewport}. Thanks to \I{Trevor Davis}' patch
       proposal in \PR{19075}.
 
-      \item Long stringed error messages are now protected from premature
-      garbage collection, fixing \PR{19210}, reported and analyzed by
-      \I{Yuancheng Jiang}.
+      \item \code{trace} with non-\code{NULL} \code{exit} replaced
+      rematched S4 method definitions with non-rematched ones that
+      evaluated \code{exit} twice, first on \code{.local} exit and again
+      on method exit.
+
+      \item When tracing rematched S4 methods, \code{trace} could insert
+      a call \code{trace(.local, tracer=, exit=, \dots)} with improper
+      \code{tracer} and \code{exit} components.  Thanks to \I{Hao Wang} for
+      the report (\PR{18707}).
+
+      \item Fixes for \code{grid.pack(row.after=)}
+      (and \code{row.before} and \code{col.after} and
+      \code{col.before}) and \code{grid.pack(dynamic=TRUE)}.
+      Thanks to \I{Athenkosi Nkonyeni} for reports.
+
+      \item \code{parse_Rd()} should no longer leak memory when errors are
+      raised, thanks to \I{Kevin Ushey}'s report and patch in \PR{19184}.
+
+      \item \code{delete.response} inadvertently converted indices
+      (components \code{response}, \code{offset}, \code{specials}) from
+      integer to double.
     }
   }
 }
 
 
-\section{\Rlogo Changes in R 4.6.1 patched}{
-
+\section{\Rlogo Changes in R 4.6.2}{
   \subsection{Bug Fixes}{
     \itemize{
       \item In plain-text help (\code{Rd2txt}), paragraphs are again
@@ -448,7 +480,7 @@
 
       Additionally, also by \I{Adam Berkeš}, \code{x <- rep(999,0);
 	ksmooth(x, x, x.points = 1)} no longer writes out of bounds, fixing
-      \PR{19171}.
+      \PR{19171}.  Ditto for \code{ksmooth(x, x, n.points = 0)}, \PR{19219}.
 
       \item \code{besselI(1, 1e11)} and \code{besselK(..)} now signal a
       warning and return \code{NaN} instead of typically segfaulting,
@@ -482,6 +514,25 @@
       \item \code{influence.measures()} inadvertently wasn't updated along
       with \code{dffits()}, \code{dfbetas()}, \code{covratio()}. \PR{19167} by
       \I{Amal Tawfik}.
+
+      \item If \code{wilcox.test(..., exact=TRUE)}'s p-value is close to
+      the 0 or 1 boundaries, the calculation no longer suffers severely
+      from cancellation, thanks to \I{Tasuku Kobayashi}'s reports and
+      \I{Ahmed Sattar Jabbar}'s suggestion in \PR{19144}.
+
+      \item Long stringed error messages are now protected from premature
+      garbage collection, fixing \PR{19210}, reported and analyzed by
+      \I{Yuancheng Jiang}.
+
+      \item \code{strsplit(str, perl=TRUE, bytes=TRUE)} no longer accesses
+      invalid memory in case \code{str} is an invalid UTF-8 string, fixing
+      \PR{19212}, thanks to \I{Kevin Ushey}.
+
+      \item \code{isoreg(numeric(0))} no longer returns unallocated component
+      \code{yc}, fixing \PR{19224} thanks to \I{Kevin Ushey}.
+
+      \item \code{KalmanLike(1:5, list(1,2))} and similar no longer
+      segfault, fixing \PR{19217} thanks to \I{Kevin Ushey} and \I{Adam Berkeš}.
     }
   }
   \subsection{Bug Fixes (Windows)}{
@@ -546,11 +597,6 @@
       \item \code{wilcox.test(x, exact=FALSE, correct = k)}'s p-value
       computation got a missing \code{dnorm(z)} factor, and so did the
       2-sample case, in addition to more fixes.
-
-      Further, if \code{wilcox.test(.., exact=TRUE)}'s p-value is close to
-      the 0 or 1 boundaries, the calculation no longer suffers severely
-      from cancellation, thanks to \I{Tasuku Kobayashi}'s reports and
-      \I{Ahmed Sattar Jabbar}'s suggestion in \PR{19144}.
 
       \item The data part of \code{getGenerics()} listed package names for
       generic functions defined in more than one package.  Now it

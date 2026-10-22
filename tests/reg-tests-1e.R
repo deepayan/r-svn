@@ -277,7 +277,6 @@ stopifnot(any(as.character(rd) != "\n"),
 ## empty output in R <= 4.2.x
 
 
-
 ## expand.model.frame() for non-data fits (PR#18414)
 y <- 1:10
 g <- gl(2, 5)
@@ -1139,7 +1138,6 @@ for(f in fbList) {
 ## with Error in as.function.default(....): list argument expected
 
 
-
 ## fix error message of as.function(..1, *)
 (msg <- tryCmsg(as.function(list({}, 1), .GlobalEnv)))
 stopifnot(!englishMsgs || grepl("invalid formal argument list", msg),
@@ -1589,7 +1587,7 @@ stopifnot(exprs = {
 
 ## debugonce(<simple>) error when called twice --  PR#18824
 setGeneric("zzz", function(x) standardGeneric("zzz"))
-setMethod("zzz", c(x = "NULL"), function(x) NULL)
+setMethod(zzz, c(x = "NULL"), function(x) NULL)
 m0 <- selectMethod(zzz, signature = "NULL")
 debugonce(zzz, signature = "NULL")
 m1 <- selectMethod(zzz, signature = "NULL")
@@ -1602,6 +1600,7 @@ stopifnot(exprs = {
     is(m1, "MethodDefinitionWithTrace")
     identical(m0, m3)
     identical(m1, m2)
+    removeGeneric("zzz")
 })
 ## 2nd debugonce() call failed in R <= 4.4.2
 
@@ -3722,11 +3721,14 @@ stopifnot(
 
 
 ## ksmooth(.., x.points = <invalid>) -- PR#19153
+## ksmooth(.., n.points = 0)         -- PR#19219
 x <- 1:11; y <- (x - 5)^2
 L00 <- list(x = numeric(), y = numeric())
 stopifnot(identical(L00, ksmooth(x,y, x.points=NULL)),
           identical(L00, ksmooth(x,y, x.points=rep(NA,999))))
 ## did seg.fault, trying to access x.points[1] from C
+stopifnot(identical(L00, ksmooth(x,y, n.points = 0)))
+## ditto segfaulted in R <= 4.6.1
 
 
 ## malformed ALTREP serialized class metadata
@@ -3837,6 +3839,22 @@ local({
 ## produced undefined behvaior
 
 
+## available.packages() "subarch" filter (only active in builds with a
+## sub-architecture, as on Windows), now checking distinct Archs entries once
+local({
+    f <- utils:::available_packages_filters_db$subarch
+    db <- cbind(Package = paste0("p", 1:6),
+                Archs = c(NA, "x64", "i386, x64", "i386", "x64", "i386,x64"))
+    r_arch <- .Platform$r_arch
+    keep <- if(!nzchar(r_arch)) 1:6
+            else if(r_arch == "x64") c(1, 2, 3, 5, 6)
+            else if(r_arch == "i386") c(1, 3, 4, 6)
+            else 1
+    stopifnot(identical(f(db), db[keep, , drop = FALSE]))
+})
+## same results as before, which took 15 times as long for CRAN on Windows
+
+
 ## parsing '<lhs> |> <var> => <expr>' left the reduced call unprotected on the
 ## parser stack, so a GC before the enclosing reduction could free it
 ## (found by fuzzing; '=>' is still opt-in, and stays enabled once seen)
@@ -3851,12 +3869,55 @@ stopifnot(identical(e[[1]][[2]], ex))
 ## gave garbage (or a crash) for the LHS of '+' in R <= 4.6.x
 
 
+## available.packages() "CRAN" filter, now linear in the number of duplicates
+local({
+    op <- options(repos = c(CRAN = "https://cran.example.org",
+                            other = "https://other.example.org"))
+    on.exit(options(op))
+    f <- utils:::available_packages_filters_db$CRAN
+    cran <- "https://cran.example.org/src/contrib"
+    x <- "https://x.example.org/src/contrib"
+    y <- "https://y.example.org/src/contrib"
+    db <- cbind(Package = c("a", "a", "b", "b", "c", "a", "d", "d", "e", "e"),
+                Repository = c(cran, x, x, y, x, y, cran, cran, x, cran))
+    stopifnot(identical(f(db), db[c(1, 3, 4, 5, 7, 8, 10), ]))
+    options(repos = c(other = "https://other.example.org"))
+    stopifnot(identical(f(db), db))
+})
+## same results as before, which took seconds for thousands of duplicates
+
+
 ## NULL and negative 'deriv' in predict.smooth.spline() - PR#19190
 ss <- smooth.spline(1:4)
 for(obj in list(ss, ss$fit))
     for(d in list(NULL, -99L))
         assertErrV(predict(obj, x = 1, deriv = d))
 ## These could cause a segfault in R <= 4.6.1
+
+
+## tools:::.remove_stale_dups(), used by available.packages() and
+## write_PACKAGES(latestOnly = TRUE), now ordering all duplicates at once
+local({
+    db <- cbind(Package = c("a", "b", "a", "c", "a", "b", "c", "d", "d"),
+                Version = c("1.0", "0.9", "1.0-1", "2.0", "1.0-1", "0.10",
+                            "2.0.0", "1.0", "1.0"),
+                Repository = paste0("r", 1:9))
+    ## the highest version, and of equal ones the first
+    keep <- c(3, 4, 6, 8)
+    stopifnot(identical(tools:::.remove_stale_dups(db), db[keep, ]))
+    df <- as.data.frame(db)
+    stopifnot(identical(tools:::.remove_stale_dups(df), df[keep, ]))
+    ## more than 100 duplicates, many in the same version
+    n <- 150
+    db <- cbind(Package = rep(paste0("p", 1:n), 3),
+                Version = c(rep("1.0", n), rep(c("1.1", "0.9"), length.out = n),
+                            rep("1.0", n)),
+                Repository = rep(c("A", "B", "C"), each = n))
+    keep <- ifelse(1:n %% 2 == 1, n + 1:n, 1:n)
+    stopifnot(identical(tools:::.remove_stale_dups(db), db[sort(keep), ]),
+              identical(tools:::.remove_stale_dups(db[1:n, ]), db[1:n, ]))
+})
+## same results as before, which looped over the duplicated packages
 
 
 ## format(<utf8>, width = large) -- PR#19188
@@ -3944,7 +4005,6 @@ stopifnot(print(abs(pvW/pvX - 1)) <= c(2e-14, 2e-14, 1e-15),
 ## not ok in  R <= 4.6.1
 
 
-
 ## read.dcf() escapes 4-byte sequences above U+10FFFF, which iconv()
 ## passes through but validUTF8() rejects, like other invalid bytes
 local({
@@ -3958,6 +4018,7 @@ local({
 ## gave "????" in R-devel since r90200, and re-encoded the whole field
 ## value for each further continuation line
 
+
 ## iconv(sub = "Unicode") and sub = "c99" never returned on invalid UTF-8 input
 x <- rawToChar(as.raw(c(0x61, 0xc3, 0x28, 0xe2, 0x82))) # "a", a lone lead byte, a truncated sequence
 stopifnot(identical(iconv(x, "UTF-8", "ASCII", sub = "Unicode"), "a<c3>(<e2><82>"),
@@ -3965,13 +4026,175 @@ stopifnot(identical(iconv(x, "UTF-8", "ASCII", sub = "Unicode"), "a<c3>(<e2><82>
           identical(iconv("caf\u00e9", "UTF-8", "ASCII", sub = "Unicode"), "caf<U+00E9>"))
 ## looped forever in R <= 4.6.1
 
-## getParseData doesn't truncate long strings
+
+## getParseData doesn't truncate long strings -- PR#19204
 long_a <- strrep("a", 1200L)
 long_expr <- sprintf("`%1$s`::`%1$s`(`%1$s` = '%1$s', . = function(`%1$s`) 0, .. = .@`%1$s`)", long_a)
 pd <- getParseData(parse(text = long_expr, keep.source = TRUE))
 long_idx <- nchar(pd$text) > 1000L
 stopifnot(sum(long_idx) == 6L,
           grepl("^(STR_CONST|SYMBOL|SLOT)", pd$token[long_idx]))
+## truncated / lost long STR_CONST parts ==> long_idx all FALSE, in R <= 4.6.1
+
+
+## strsplit(perl = TRUE) stepped over an empty match by utf8clen() -- PR#19212
+x <- "\xff"; Encoding(x) <- "bytes"
+y <- "a\xffb"; Encoding(y) <- "bytes"
+stopifnot(identical(strsplit(x, "|",  perl = TRUE, useBytes = TRUE),
+                    strsplit(x, "|",               useBytes = TRUE)),
+          identical(strsplit(y, "x*", perl = TRUE, useBytes = TRUE),
+                    strsplit(y, "x*",              useBytes = TRUE)))
+## heap-buffer-overflow in R 4.4.0 to 4.6.1 (visible under ASan)
+
+
+## nls() when the model evaluates to a zero-column data frame
+local({
+    y <- 1:3
+    E <- tryCid(nls(y ~ data.frame(), start = list(b = 0.5)))
+    stopifnot(inherits(E, "error"))
+    if(englishMsgs)
+        stopifnot(grepl("evaluated to length 0, not 1", conditionMessage(E)))
+})
+## segfaulted in R <= 4.6.1
+
+
+## isoreg() on empty input left 'yc' uninitialized -- PR#19224
+x <- lapply(1:1e4, function(i) 12345.5 + 0); rm(x); invisible(gc()) # free nodes holding junk
+stopifnot(vapply(1:5, function(i) identical(0, isoreg(numeric(0))$yc), NA))
+## returned stale heap contents in R <= 4.6.1
+
+
+## fisher.test() when the workspace left for the hash tables is < 2 entries
+local({
+    E1 <- tryCid(fisher.test(matrix(c(50000, 9900, 20000, 5000, 10000, 4000), 2)))
+    E2 <- tryCid(fisher.test(matrix(1:6, 2), workspace = 2100))
+    E3 <- tryCid(fisher.test(matrix(1:6, 2), workspace = 2000))
+    stopifnot(inherits(E1, "error"), inherits(E2, "error"), inherits(E3, "error"))
+    if(englishMsgs)
+        stopifnot(grepl("Out of workspace", c(conditionMessage(E1),
+                                              conditionMessage(E2),
+                                              conditionMessage(E3))))
+})
+## segfaulted or gave p-value 0 in R <= 4.6.1
+
+
+## parse(keep.source = TRUE) after a lexer error in a previous parse
+stopifnot(exprs = {
+    inherits(tryCid(parse(text = "#a\n#a\n#a\ny + '\\q'", keep.source = TRUE)), "error")
+    is.list(pd <- getParseData(parse(text = "c#\nc#\n",   keep.source = TRUE)))
+    identical(pd$parent[pd$token == "COMMENT"],
+              -pd$id[pd$token == "expr"])
+})
+## looped forever in R <= 4.6.1
+
+
+## Kalman*() with a list 'mod' lacking names -- PR#19217
+assertErrV(KalmanLike(1, list(1, 2)))
+assertErrV(KalmanForecast(3, list(1,"a")))
+assertErrV(qr.influence(qr = list(1,"a"), res = 0))
+## segfaulted in R <= 4.6.1
+
+
+## PR#19226: UTF-8 replacement not representable in current locale
+tools::assertError(chartr("a", intToUtf8(256L), "a")) # since LC_ALL=C
+
+
+## R < 4.6.3: tracing rematched S4 methods mishandled 'tracer', 'exit'
+setGeneric("F", function (x, ...) standardGeneric("F"))
+setMethod(F, sig <- c(x = "ANY"), function (x, y, ...) invisible(NULL))
+incV <- function () v <<- v + 1L; v <- 0L
+## trace(exit=): replacement lost rematched property, evaluated twice
+body(m1 <- getMethod(F, sig)); F()
+stopifnot(identical(v, 0L), isRematched(m1), !is(m1, "traceable"))
+trace("F", signature = sig, exit = incV)
+body(m2 <- getMethod(F, sig)); F()
+stopifnot(identical(v, 1L), isRematched(m2),  is(m2, "traceable"))
+trace("F", signature = sig, exit = incV)
+body(m3 <- getMethod(F, sig)); F()
+stopifnot(identical(v, 2L), identical(m2, m3))
+untrace(F, signature = sig)
+## trace(tracer=): replacement had call trace(.local, tracer=*, ...)
+##                 with bad 'tracer' component under some conditions
+##                 ==> PR#18707
+traceF <- function (.) { trace(F, signature = sig, tracer = .); F() }
+traceF(quote({})) # was Error .... : object '.' not found
+body(getMethod(F, sig)) # saw trace(.local, tracer = ., ...),
+                        # now tracer = base::quote({})
+fnf <- tryCatch(traceF(function () {}), error = identity)
+body(getMethod(F, sig)) # saw trace(.local, tracer = ., ...),
+                        # now tracer = base::quote(.())
+stopifnot(inherits(fnf, "functionNotFoundError"),
+          identical(conditionCall(fnf), quote(.())),
+          removeGeneric("F"))
+
+
+## besselY() with large negative non-integer order -- NaN with warning
+assertWarnV(bY <- besselY(1, -2e7 - c(0.5, 0.25)))
+stopifnot(is.nan(bY))
+## segfaulted in R-devel since r90571
+
+
+## available.packages() "R_version" filter, now comparing each distinct R
+## dependency once
+local({
+    f <- utils:::available_packages_filters_db$R_version
+    db <- cbind(Package = paste0("p", 1:10),
+                Depends = c(NA, "R (>= 2.0)", "R (>= 999.0)", "methods, R(>=3.0)",
+                            "R (>= 2.0), R (< 3.0)", "Rcpp (>= 999.0)",
+                            "R\n    (>= 999.0)", "XR (>= 999.0)",
+                            paste0("R (== ", getRversion(), ")"),
+                            "R (>= 999.0), methods"))
+    stopifnot(identical(f(db), db[c(1, 2, 4, 6, 8, 9), ]),
+              identical(f(db[c(1, 6, 8), ]), db[c(1, 6, 8), ]))
+})
+## same results as before, which took 2-3 times as long for CRAN
+
+
+
+## unserialize() in ascii format stopped at end of input instead of padding
+x <- strrep("a", 100)
+s <- rawToChar(serialize(x, NULL, ascii = TRUE))
+tc <- textConnection(substr(s, 1, nchar(s) - 50)) # cut inside the string
+r <- tryCatch(unserialize(tc), error = identity); close(tc)
+stopifnot(inherits(r, "error"))
+## silently returned a string padded with EOF bytes in R <= 4.6.0
+
+
+
+## load() of a hand-crafted RDX2 file whose pairlist chain holds a
+## non-pairlist node
+local({
+    f <- tempfile()
+    ## version 2 header, then a LISTSXP node tagged with the symbol "x",
+    ## with CAR = NULL
+    node <- c(charToRaw("RDX2\nX\n"),
+              writeBin(c(2L, 0x00040500L, 0x00020300L, 0x402L, 1L, 0x40009L),
+                       raw(), endian = "big"),
+              writeBin(1L, raw(), endian = "big"), charToRaw("x"),
+              writeBin(0xfeL, raw(), endian = "big"))
+    ## CDR: an EXTPTRSXP (prot = NULL, tag = ref to "x")
+    writeBin(c(node, writeBin(c(0x16L, 0xfeL, 0x1ffL), raw(), endian = "big")),
+             f)
+    E1 <- tryCid(load(f, new.env()))
+    ## CDR: a new SYMSXP "y", whose value slot is R_UnboundValue
+    writeBin(c(node, writeBin(c(1L, 0x40009L, 1L), raw(), endian = "big"),
+               charToRaw("y")), f)
+    E2 <- tryCid(load(f, new.env()))
+    stopifnot(inherits(E1, "error"), inherits(E2, "error"))
+    if(englishMsgs)
+        stopifnot(grepl("not in pair list form", conditionMessage(E1)),
+                  grepl("not in pair list form", conditionMessage(E2)))
+    unlink(f)
+})
+## segfaulted (E1) or looped forever (E2) in R <= 4.6.1
+
+
+## 'delete.response' converted indices from integer to double
+t1 <- terms(y ~ offset(a) + x + f(w), specials = "f")
+a0 <- attributes(t0 <- delete.response(t1))
+stopifnot(identical(a0$response, 0L),
+          is.integer(a0$offset), is.integer(a0$specials$f))
+
 
 ## keep at end
 rbind(last =  proc.time() - .pt,
