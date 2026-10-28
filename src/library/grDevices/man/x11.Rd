@@ -109,7 +109,11 @@ X11.options(\dots, reset = FALSE)
   \item{reset}{logical: should the defaults be reset to their defaults?}
 
   \item{\dots}{Any of the arguments to \code{X11}, plus \code{colortype}
-    and \code{maxcubesize} (see section \sQuote{Colour Rendering}).}
+    and \code{maxcubesize} (see section \sQuote{Colour Rendering}), and
+    \code{keys} (a named list of character vectors specifying key bindings
+    for plot history navigation: \code{back}, \code{forward}, \code{first},
+    and \code{last}, defaulting to \code{list(back = "PgUp", forward = "PgDn",
+    first = "Home", last = "End")}).}
 }
 \details{
   The defaults for all of the arguments of \code{X11} are set by

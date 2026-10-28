@@ -31,8 +31,12 @@ assign(".X11.Options",
             family = "sans",
             symbolfamily = "default",
             xpos = NA_integer_, ypos = NA_integer_,
-	    title = "", type = "cairo", antialias = "default"),
+	    title = "", type = "cairo", antialias = "default",
+            keys = list(back = "PgUp", forward = "PgDn",
+                        first = "Home", last = "End")),
        envir = .X11env)
+
+assign(".X11.History", new.env(hash = TRUE, parent = emptyenv()), envir = .X11env)
 
 assign(".X11.Options.default",
        get(".X11.Options", envir = .X11env),
@@ -227,4 +231,119 @@ optionSymbolFont <- function(family) {
     } else {
         checkSymbolFont(family)
     }
+}
+
+
+####################
+# X11 plot history
+####################
+
+x11_is_valid_snapshot <- function(snap)
+{
+    !is.null(snap) && is.list(snap) && length(snap) >= 1L && !is.null(snap[[1L]])
+}
+
+x11_format_snapshot <- function(snap)
+{
+    if (!inherits(snap, "recordedplot")) {
+        attr(snap, "pid") <- Sys.getpid()
+        attr(snap, "Rversion") <- getRversion()
+        class(snap) <- "recordedplot"
+    }
+    snap
+}
+
+x11_history_callback <- function(action, dev, key = NULL, snapshot = NULL)
+{
+    hist_env <- get(".X11.History", envir = .X11env)
+    dkey <- as.character(dev)
+
+    if (action == "close") {
+        if (exists(dkey, envir = hist_env, inherits = FALSE))
+            rm(list = dkey, envir = hist_env)
+        return(invisible(NULL))
+    }
+
+    h <- get0(dkey, envir = hist_env, inherits = FALSE)
+    if (is.null(h)) {
+        h <- list(plots = list(), pos = 0L)
+    }
+
+    if (action == "newPage") {
+        if (x11_is_valid_snapshot(snapshot)) {
+            snapshot <- x11_format_snapshot(snapshot)
+            n <- length(h$plots)
+            if (h$pos > 0L && h$pos <= n) {
+                h$plots[[h$pos]] <- snapshot
+            } else {
+                h$plots[[n + 1L]] <- snapshot
+            }
+        }
+        ## New page is now being drawn at the tail of history
+        h$pos <- length(h$plots) + 1L
+        assign(dkey, h, envir = hist_env)
+        return(invisible(NULL))
+    }
+
+    if (action == "key") {
+        keys <- X11.options()$keys
+        if (is.null(keys) || is.null(key) || !nzchar(key))
+            return(NULL)
+
+        ## Determine which navigation action matches the pressed key
+        nav <- NULL
+        for (act in names(keys)) {
+            if (key %in% keys[[act]]) {
+                nav <- act
+                break
+            }
+        }
+        if (is.null(nav)) return(NULL)
+
+        ## Normalize action synonyms
+        nav <- switch(nav,
+                      prev = , previous = , back = "back",
+                      `next` = , forward = "forward",
+                      first = , home = "first",
+                      last = , end = "last",
+                      nav)
+
+        ## Save current unsaved plot before navigating away
+        if (x11_is_valid_snapshot(snapshot)) {
+            snapshot <- x11_format_snapshot(snapshot)
+            n <- length(h$plots)
+            if (h$pos > 0L && h$pos <= n) {
+                h$plots[[h$pos]] <- snapshot
+            } else {
+                h$plots[[n + 1L]] <- snapshot
+                h$pos <- n + 1L
+            }
+        }
+
+        n <- length(h$plots)
+        if (n == 0L) {
+            assign(dkey, h, envir = hist_env)
+            return(NULL)
+        }
+
+        cur <- if (h$pos < 1L || h$pos > n) n + 1L else h$pos
+        target_pos <- switch(nav,
+                             back    = max(1L, cur - 1L),
+                             forward = min(n,  cur + 1L),
+                             first   = 1L,
+                             last    = n,
+                             cur)
+
+        if (target_pos < 1L || target_pos > n || target_pos == h$pos) {
+            assign(dkey, h, envir = hist_env)
+            return(NULL)
+        }
+
+        h$pos <- target_pos
+        assign(dkey, h, envir = hist_env)
+        title_str <- sprintf(" [%d/%d]", target_pos, n)
+        return(list(h$plots[[target_pos]], title_str))
+    }
+
+    invisible(NULL)
 }
