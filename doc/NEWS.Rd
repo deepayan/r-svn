@@ -178,8 +178,8 @@
       can no longer place a link or file outside the extraction directory;
       rejects hard- and symbolic-link targets restored as file copies,
       which resolve outside the extraction directory or pass through a
-      symbolic link; applies the umask to extracted files; also no longer
-      restores \abbr{setuid} or \abbr{setgid} permission bits.
+      symbolic link; applies the \command{umask} to extracted files; also no longer
+      restores \samp{setuid} or \samp{setgid} permission bits.
       Similarly, the internal method of \code{unzip()} no longer extracts
       through symbolic links below \code{exdir}, both thanks to \I{Kevin
       Ushey}'s report and patch in \PR{19229}.
@@ -396,8 +396,26 @@
       raised, thanks to \I{Kevin Ushey}'s report and patch in \PR{19184}.
 
       \item \code{delete.response} inadvertently converted indices
-      (components \code{response}, \code{offset}, \code{specials}) from
-      integer to double.
+      (attributes \code{response}, \code{offset}, \code{specials}) from
+      integer to double.  It also replaced \code{NULL} components of
+      \code{specials} with \code{logical(0L)}.
+
+      \item When interaction terms or offsets were present,
+      \code{drop.terms} and \code{[.terms} could return a \code{terms}
+      object with invalid \code{predvars} and \code{dataClasses}
+      attributes.  One consequence was that \code{x[-j]} and
+      \code{x[seq_len(n)[-j]]} could differ for objects \code{x} with
+      \code{n} terms and indices \code{j} in \code{seq_len(n)}.
+
+      \item \code{unzip(., unzip = "internal")} no longer leaks the zip
+      handle on error, thanks to \I{Kevin Ushey}, see \PR{19233}
+
+      \item The S4 methods for \code{initialize} with signature
+      \code{.Object="oldClass"} or \code{.Object=".environment"}
+      evaluated arguments of type \code{"symbol"} or \code{"call"} when
+      dispatching next methods, causing misbehaviour of
+      \code{new(Class, \dots)} with symbols or calls in \code{\dots}.
+      Thanks to \I{Alexis Sardá-Espinosa} for the report (\PR{16629}).
     }
   }
 }
