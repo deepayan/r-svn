@@ -200,8 +200,8 @@ static void SetLinetype(const pGEcontext, pX11Desc);
 static void X11_Close_bitmap(pX11Desc xd);
 static char* translateFontFamily(char* family, pX11Desc xd);
 
-/* Support replaying previous plots */
-static void X11_UpdateTitle(pDevDesc dd);
+/* Support replaying previous plots (history) */
+static void X11_UpdateTitle(pDevDesc dd, Rboolean active);
 static void X11_HistoryNewPage(pDevDesc dd);
 static void X11_HistoryClose(pDevDesc dd);
 static void X11_HistoryKey(pDevDesc dd, XKeyEvent *xkey);
@@ -2179,13 +2179,8 @@ static void X11_Close(pDevDesc dd)
     inclose = FALSE;
 }
 
-static void X11_UpdateTitle(pDevDesc dd)
+static void X11_UpdateTitle(pDevDesc dd, Rboolean active)
 {
-    /* FIXME: check carefully whether this is working as expected. It
-       may be safer to explicitly supply a flag to activate /
-       deactivate rather than trying to guess when calling from
-       X11_Activate() and X11_Deactivate().
-    */
     char t[220];
     pX11Desc xd = (pX11Desc) dd->deviceSpecific;
 
@@ -2196,12 +2191,12 @@ static void X11_UpdateTitle(pDevDesc dd)
     } else {
 	snprintf(t, 140, "R Graphics: Device %d", ndevNumber(dd) + 1);
     }
-    if (ndevNumber(dd) == curDevice())
+    if (active)
 	strcat(t, " (ACTIVE)");
     else
 	strcat(t, " (inactive)");
     if (xd->histtitle[0]) {
-	strncat(t, xd->histtitle, 63);
+	strncat(t, xd->histtitle, 127);
 	t[sizeof(t) - 1] = '\0';
     }
     XStoreName(display, xd->window, t);
@@ -2210,12 +2205,12 @@ static void X11_UpdateTitle(pDevDesc dd)
 
 static void X11_Activate(pDevDesc dd)
 {
-    X11_UpdateTitle(dd);
+    X11_UpdateTitle(dd, TRUE);
 }
 
 static void X11_Deactivate(pDevDesc dd)
 {
-    X11_UpdateTitle(dd);
+    X11_UpdateTitle(dd, FALSE);
 }
 
 static void X11_Rect(double x0, double y0, double x1, double y1,
@@ -2670,7 +2665,7 @@ static const char *X11_keynames[] = {
 };
 
 static SEXP X11_InvokeHistoryCallback(const char *action, int dev_num,
-				      SEXP key, SEXP snap)
+				      SEXP key, SEXP snapshot)
 {
     SEXP graphicsNS, fn, call, res = R_NilValue;
     int err = 0;
@@ -2681,7 +2676,7 @@ static SEXP X11_InvokeHistoryCallback(const char *action, int dev_num,
 	fn = eval(fn, graphicsNS);
     if (TYPEOF(fn) == CLOSXP) {
 	PROTECT(call = lang5(fn, mkString(action), ScalarInteger(dev_num),
-			     key, snap));
+			     key, snapshot));
 	res = R_tryEval(call, graphicsNS, &err);
 	UNPROTECT(1);
     }
@@ -2697,19 +2692,19 @@ static void X11_HistoryNewPage(pDevDesc dd)
 
     pGEDevDesc gdd = desc2GEDesc(dd);
     int dev_num = ndevNumber(dd) + 1;
-    SEXP snap = R_NilValue;
+    SEXP snapshot = R_NilValue;
 
     if (xd->needsave && gdd && gdd->savedSnapshot != R_NilValue) {
-	snap = gdd->savedSnapshot;
+	snapshot = gdd->savedSnapshot;
     }
-    PROTECT(snap);
-    X11_InvokeHistoryCallback("newPage", dev_num, R_NilValue, snap);
+    PROTECT(snapshot);
+    X11_InvokeHistoryCallback("newPage", dev_num, R_NilValue, snapshot);
     UNPROTECT(1);
 
     xd->needsave = TRUE;
     if (xd->histtitle[0]) {
 	xd->histtitle[0] = '\0';
-	X11_UpdateTitle(dd);
+	X11_UpdateTitle(dd, ndevNumber(dd) == curDevice());
     }
 }
 
@@ -2775,19 +2770,20 @@ static void X11_HistoryKey(pDevDesc dd, XKeyEvent *xkey)
     pGEDevDesc gdd = desc2GEDesc(dd);
     if (!gdd) return;
     int dev_num = ndevNumber(dd) + 1;
+    int saved_dev = curDevice();
 
-    SEXP cur_snap = R_NilValue;
+    SEXP cur_snapshot = R_NilValue;
     if (xd->needsave && gdd->displayList != R_NilValue) {
-	cur_snap = GEcreateSnapshot(gdd);
+	cur_snapshot = GEcreateSnapshot(gdd);
     }
-    PROTECT(cur_snap);
+    PROTECT(cur_snapshot);
     SEXP skey = PROTECT(mkString(kname));
-    SEXP res = PROTECT(X11_InvokeHistoryCallback("key", dev_num, skey, cur_snap));
+    SEXP res = PROTECT(X11_InvokeHistoryCallback("key", dev_num, skey, cur_snapshot));
 
     if (TYPEOF(res) == VECSXP && LENGTH(res) >= 2) {
-	SEXP snap = VECTOR_ELT(res, 0);
+	SEXP snapshot = VECTOR_ELT(res, 0);
 	SEXP stitle = VECTOR_ELT(res, 1);
-	if (snap != R_NilValue) {
+	if (snapshot != R_NilValue) {
 	    xd->replaying = TRUE;
 	    if (TYPEOF(stitle) == STRSXP && LENGTH(stitle) >= 1) {
 		strncpy(xd->histtitle, CHAR(STRING_ELT(stitle, 0)),
@@ -2796,17 +2792,21 @@ static void X11_HistoryKey(pDevDesc dd, XKeyEvent *xkey)
 	    }
 	    XDefineCursor(display, xd->window, watch_cursor);
 	    XSync(display, 0);
-	    GEplaySnapshot(snap, gdd);
+	    GEplaySnapshot(snapshot, gdd);
 #ifdef HAVE_WORKING_X11_CAIRO
 	    if (xd->useCairo && xd->buffered)
 		Cairo_update(xd);
 #endif
 	    XDefineCursor(display, xd->window, arrow_cursor);
-	    X11_UpdateTitle(dd);
+	    if (curDevice() != saved_dev)
+		selectDevice(saved_dev);
+	    X11_UpdateTitle(dd, ndevNumber(dd) == curDevice());
 	    xd->replaying = FALSE;
 	    xd->needsave = FALSE;
 	}
     }
+    if (curDevice() != saved_dev)
+	selectDevice(saved_dev);
     UNPROTECT(3);
 }
 
