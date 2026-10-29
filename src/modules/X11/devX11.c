@@ -152,6 +152,7 @@ static void X11_Clip(double x0, double x1, double y0, double y1,
 static void X11_Close(pDevDesc dd);
 static void X11_Deactivate(pDevDesc dd);
 static Rboolean X11_Locator(double *x, double *y, pDevDesc dd);
+static Rboolean X11_NewFrameConfirm(pDevDesc dd);
 static void X11_Line(double x1, double y1, double x2, double y2,
 		     const pGEcontext gc, pDevDesc dd);
 static void X11_MetricInfo(int c, const pGEcontext gc,
@@ -2634,6 +2635,84 @@ static Rboolean X11_Locator(double *x, double *y, pDevDesc dd)
     return (done == 1);
 }
 
+static Rboolean X11_NewFrameConfirm(pDevDesc dd)
+{
+    XEvent event;
+    pX11Desc xd = (pX11Desc) dd->deviceSpecific;
+    caddr_t temp;
+    int done = 0;
+
+    if (xd->type > WINDOW) return FALSE;
+
+    int old_holdlevel = xd->holdlevel;
+    xd->holdlevel = 0;
+#ifdef HAVE_WORKING_X11_CAIRO
+    if (xd->buffered) Cairo_update(xd);
+#endif
+    R_ProcessX11Events((void*) NULL);
+
+    const char *prompt = _("Hit <Return> to see next plot: ");
+    R_WriteConsole(prompt, (int) strlen(prompt));
+    R_FlushConsole();
+
+    while (!done && displayOpen && ndevNumber(dd) > 0) {
+	while (XPending(display)) {
+	    XNextEvent(display, &event);
+	    if (event.type == KeyPress) {
+		if (XFindContext(display, event.xkey.window,
+				 devPtrContext, &temp) == 0 &&
+		    (pDevDesc) temp == dd) {
+		    char keybuf[16];
+		    XComposeStatus compose;
+		    KeySym keysym = NoSymbol;
+		    XLookupString(&event.xkey, keybuf, sizeof(keybuf),
+				  &keysym, &compose);
+		    if (keysym == XK_Return || keysym == XK_KP_Enter ||
+			keysym == XK_Linefeed) {
+			R_WriteConsole("\n", 1);
+			R_FlushConsole();
+			done = 1;
+			break;
+		    }
+		}
+	    }
+	    handleEvent(event);
+	}
+	if (done || !displayOpen || ndevNumber(dd) == 0) break;
+
+	int wt = -1;
+	if (R_wait_usec > 0) wt = R_wait_usec;
+#ifdef HAVE_WORKING_X11_CAIRO
+	if (Rg_wait_usec > 0 && (wt < 0 || wt > Rg_wait_usec))
+	    wt = Rg_wait_usec;
+#endif
+	fd_set *what = R_checkActivity(wt, 0);
+	if (what == NULL) {
+	    R_runHandlers(R_InputHandlers, NULL);
+	    continue;
+	}
+	if (FD_ISSET(fileno(stdin), what)) {
+	    char buf[1024];
+	    if (fgets(buf, sizeof(buf), stdin) == NULL)
+		clearerr(stdin);
+	    done = 1;
+	    break;
+	}
+	if (displayOpen)
+	    FD_CLR(ConnectionNumber(display), what);
+	R_runHandlers(R_InputHandlers, what);
+    }
+
+    xd->holdlevel = old_holdlevel;
+#ifdef HAVE_WORKING_X11_CAIRO
+    if (xd->holdlevel > 0) {
+	XDefineCursor(display, xd->window, watch_cursor);
+	XSync(display, 0);
+    }
+#endif
+    return TRUE;
+}
+
 static int translate_key(KeySym keysym)
 {
     if ((keysym >= XK_F1) && (keysym <= XK_F12))
@@ -3178,6 +3257,7 @@ Rf_setX11DeviceData(pDevDesc dd, double gamma_fac, pX11Desc xd)
     dd->size = X11_Size;
     dd->locator = X11_Locator;
     dd->mode = X11_Mode;
+    dd->newFrameConfirm = X11_NewFrameConfirm;
     dd->useRotatedTextInContour = FALSE;
 
     /* Set required graphics parameters. */
