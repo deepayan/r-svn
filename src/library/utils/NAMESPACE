@@ -189,7 +189,7 @@ S3method(.AtNames, default)
 
 export(Rtangle, RtangleSetup, RweaveLatex, RweaveLatexSetup, Stangle,
        Sweave, SweaveSyntConv, SweaveSyntaxLatex, SweaveSyntaxNoweb,
-       SweaveSyntaxTexinfo,
+       SweaveSyntaxTexinfo, SweaveSyntaxHtml,
        RtangleWritedoc, RweaveChunkPrefix, RweaveEvalWithOpt,
        RweaveTryStop, SweaveHooks, RweaveLatexWritedoc,
        RweaveLatexOptions, RtangleOptions, RweaveLatexFinish, RtangleFinish,
@@ -198,6 +198,9 @@ export(Rtangle, RtangleSetup, RweaveLatex, RweaveLatexSetup, Stangle,
        RweaveTexinfo, RweaveTexinfoSetup, RweaveTexinfoWritedoc,
        RweaveTexinfoOptions, RweaveTexinfoFinish, RweaveTexinfoRuncode,
        makeRweaveTexinfoCodeRunner,
+       RweaveHTML, RweaveHTMLSetup, RweaveHTMLWritedoc,
+       RweaveHTMLOptions, RweaveHTMLFinish, RweaveHTMLRuncode,
+       makeRweaveHTMLCodeRunner,
        SweaveGetSourceName)
 
 if(tools:::.OStype() == "unix") {

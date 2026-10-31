@@ -87,8 +87,9 @@ Stangle(file, driver = Rtangle(),
   objects are consulted in turn, and selected if their \code{extension}
   component matches (as a regexp) the file name.  Objects
   \code{\link{SweaveSyntaxNoweb}} (with \code{extension = "[.][rsRS]nw$"}),
-  \code{\link{SweaveSyntaxLatex}} (with \code{extension = "[.][rsRS]tex$"}), and
-  \code{\link{SweaveSyntaxTexinfo}} (with \code{extension = "[.][rsRS]?texi$"})
+  \code{\link{SweaveSyntaxLatex}} (with \code{extension = "[.][rsRS]tex$"}),
+  \code{\link{SweaveSyntaxTexinfo}} (with \code{extension = "[.][rsRS]?texi$"}), and
+  \code{\link{SweaveSyntaxHtml}} (with \code{extension = "[.][rsRS]?html$"})
   are supplied, but users or packages can supply others with names matching
   the pattern \samp{SweaveSyntax.*}.
 }
@@ -105,7 +106,7 @@ Stangle(file, driver = Rtangle(),
   \sQuote{\href{../doc/Sweave.pdf}{Sweave User Manual}}, a vignette in
   the \pkg{utils} package.
 
-  \code{\link{RweaveLatex}}, \code{\link{RweaveTexinfo}}, \code{\link{Rtangle}}.
+  \code{\link{RweaveLatex}}, \code{\link{RweaveTexinfo}}, \code{\link{RweaveHTML}}, \code{\link{Rtangle}}.
   Alternative Sweave drivers are in, for example, packages
   \pkg{weaver} (Bioconductor), \CRANpkg{R2HTML}, and \CRANpkg{ascii}.
 
