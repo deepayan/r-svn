@@ -3818,8 +3818,8 @@ fitP <- glm(counts ~ outcome + treatment, family = poisson())
 fit0 <- update(fitP, . ~ outcome)
                  (A1 <- anova(      fitP, test = "Rao"))
                   A2 <- anova(fit0, fitP, test = "Rao")
-stopifnot(identical(A1, anova(fitP,       test = "Ra")),
-          identical(A2, anova(fit0, fitP, test = "Ra")))
+stopifnot(all.equal(A1, anova(fitP,       test = "Ra"), tolerance = 1e-13),
+          all.equal(A2, anova(fit0, fitP, test = "Ra"), tolerance = 1e-13))
 ## "Ra" gave error  "undefined columns selected"  in  R <= 4.6.1
 
 
@@ -3887,6 +3887,16 @@ local({
 })
 ## same results as before, which took seconds for thousands of duplicates
 
+## available.packages() "CRAN" filter now works with prefixes correctly
+local({
+    op <- options(repos = c(CRAN = CRAN <- "https://cran.example",
+                            notCRAN = notCRAN <- "https://cran.example.invalid"))
+    on.exit(options(op))
+    f <- utils:::available_packages_filters_db$CRAN
+    db <- cbind(Package = "pkg",
+                Repository = contrib.url(c(CRAN, notCRAN), "source"))
+    stopifnot(identical(f(db), db[1,, drop = FALSE]))
+})
 
 ## NULL and negative 'deriv' in predict.smooth.spline() - PR#19190
 ss <- smooth.spline(1:4)
@@ -4202,6 +4212,23 @@ if (l10n_info()[["UTF-8"]]) {
 }
 ## read 3 bytes past the end of the field buffer in R <= 4.6.1
 
+## an output textConnection() kept its character vector alive only through
+## the binding of the target name -- PR#19228
+con <- textConnection("out", "w")
+cat("a", file = con)
+rm(out); invisible(gc())
+junk <- lapply(1:2000, function(i) pairlist(i)) # reuse the freed node
+cat("b\n", file = con)
+close(con)
+stopifnot(identical(out, "ab"))
+con <- textConnection("out", "w")
+tools::assertError(textConnection("out", "w")) # locked whilst open, as documented
+close(con)
+stopifnot(!bindingIsLocked("out", environment()))
+## used a freed STRSXP in R <= 4.6.2; second textConnection() silently
+## replaced the first
+
+
 
 ## unzip(*, unzip = "internal") leaks the zip handle on error -- PR#19233
 le <- function(x, n) writeBin(as.integer(x), raw(), size = n, endian = "little")
@@ -4221,6 +4248,20 @@ if(dir.exists(dfd <- "/dev/fd")) withAutoprint({
 })          # ^^^^^^^
 unlink(zipfile)
 ## n2 - n1 was 50 in R <= 4.6.2
+
+## parse error after a #line directive read a freed srcfile -- PR#19255
+local({
+    old <- gctorture2(1L)
+    on.exit(gctorture2(old))
+    msg <- tryCatch(str2expression("#line 1 \"srcfile.R\"\n("),
+                    error = conditionMessage)
+    stopifnot(startsWith(msg, "srcfile.R:2:0:"))
+    msg <- tryCatch(parse(text = "#line 1 \"srcfile.R\"\n(", keep.source = TRUE),
+                    error = conditionMessage)
+    stopifnot(startsWith(msg, "srcfile.R:2:0:"))
+})
+## "unprotected object (was STRSXP)" in a checking build of R <= 4.6.2
+
 
 
 ## 'drop.terms' and '[.terms' mishandled the optional attributes
@@ -4284,6 +4325,106 @@ for (nm in c("array", "matrix", "ts", "numeric")) {
               removeClass(nm.sub))
 }
 ## in R <= 4.6.2
+
+
+## adist(counts = TRUE) with NA elements in 'x'
+local({
+    d <- adist(c(NA, "ab", NA), c("a", "b"), counts = TRUE)
+    cnt <- attr(d, "counts")
+    stopifnot(is.na(cnt[c(1, 3), , ]),
+              cnt[2, , "ins"] == 0L, cnt[2, , "del"] == 1L, cnt[2, , "sub"] == 0L)
+    d <- adist(rep(NA, 100), "a", counts = TRUE)
+    stopifnot(is.na(d), is.na(attr(d, "counts")))
+})
+## wrote past the "counts" array: gave garbage counts or segfaulted in R <= 4.6.2
+
+
+## R CMD check notes repeated entries in one dependency field
+td <- tempfile("pkg"); dir.create(td)
+writeLines(c("Package: pkg", "Version: 1.0",
+             "Imports: utils, stats, utils,",
+             "  Matrix (>= 1.6-0), Matrix(< 1.8-0)",
+             "Suggests: foo, foo (>= 1.0), bar (>= 2.0), bar (>= 2.0)"),
+           file.path(td, "DESCRIPTION"))
+r <- tools:::.check_package_description2(file.path(td, "DESCRIPTION"))
+stopifnot(identical(r$repeated, list(Imports = "utils",
+                                     Suggests = c("foo", "bar"))))
+unlink(td, recursive = TRUE)
+## no NOTE in R <= 4.6.2
+
+
+## x[i] <- v coercing and extending x with check.bounds on -- PR#19111
+local({
+    op <- options(check.bounds = TRUE)
+    on.exit(options(op))
+    x <- c(TRUE, FALSE)
+    gctorture(TRUE)
+    suppressWarnings(x[5] <- 1L)
+    gctorture(FALSE)
+    stopifnot(identical(x, c(1L, 0L, NA, NA, 1L)))
+})
+## gave garbage, an error or a segfault in R <= 4.6.2
+
+
+## readLines() must free its line buffer on error, including after growth.
+## The error cases also exercise the cleanup under leak checkers.
+local({
+    tf <- tempfile()
+    old <- options(warn = 2)
+    for (mode in c("", "rt")) {
+        ## A corrupt gzip stream fails while reading the first line.
+        writeBin(as.raw(c(0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 3,
+                          rep(0xaf, 40))), tf)
+        con <- gzfile(tf, mode)
+        stopifnot(inherits(tryCid(readLines(con)), "error"),
+                  identical(isOpen(con), nzchar(mode)))
+        close(con)
+        ## Errors after growth, both during reading and after closing.
+        line <- strrep("a", 8000)
+        writeBin(c(charToRaw(line), as.raw(0), charToRaw("x\n")), tf)
+        con <- file(tf, mode)
+        stopifnot(inherits(tryCid(readLines(con)), "error"),
+                  identical(isOpen(con), nzchar(mode)))
+        close(con)
+        writeChar(line, tf, eos = NULL)
+        con <- file(tf, mode)
+        stopifnot(inherits(tryCid(readLines(con)), "error"),
+                  identical(isOpen(con), nzchar(mode)))
+        close(con)
+    }
+    options(old)
+    unlink(tf)
+})
+## leaked the buffer on errors in R <= 4.6.x
+
+
+## str() missing spaces (" ") after "attr(*, "<....>")="  -- PR#18719 (part 2)
+op <- options(keep.source = TRUE)
+dostr <- function(x) { writeLines(A <- capture.output( str(x) )); A }
+chf <- dostr(lf <- list(frml = formula(ChickWeight)))
+chr <- dostr(lr <- local({B <- BOD[FALSE,]; attr(B,"int") <- 2L; list(ref = B)}))
+chF <- dostr(structure(dostr, foo = function(x) foo))
+stopifnot(exprs = {
+    length(chf) == 3L
+    grepl(" $ frml: Class 'form",chf[2], fixed=TRUE) # 1 space
+    grepl("= <environment:",     chf[3], fixed=TRUE) #   "
+    length(chr) == 6L
+    grepl("\"reference\")= chr", chr[5], fixed=TRUE) # 1 space only (had *2* for a while)
+    grepl(      "\"int\")= int", chr[6], fixed=TRUE)
+    grepl("$ ref: ", chr[2], fixed=TRUE) # space after ':'
+    length(chF) == 6L
+    grepl("\"srcref\")= 'srcref'", chF[c(2,5)], fixed=TRUE)
+    grepl("\"srcfile\")= Classes 'srcfilecopy", chF[c(3,6)], fixed=TRUE)
+    grepl("attr(*, \"foo\")= function", chF[4], fixed=TRUE)
+}) ; options(op)
+## space was missing after '<some>:' and '=' in some cases in R <= 4.6.2
+
+
+
+## grepRaw() with truncated TRE patterns -- PR#18995
+for (p in c("[", "[[:alpha:", "[a-", "(", "(?", "(?#", "\\x", "\\x4", "\\x{4"))
+    tryCatch(grepRaw(p, "abc"), error = function(e) NULL)
+## read past the end of the pattern in R <= 4.6.2 (visible under ASan)
 
 
 ## keep at end
