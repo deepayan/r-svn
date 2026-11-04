@@ -219,8 +219,13 @@ SweaveReadFile <- function(file, syntax, encoding = "")
         enc <- tools:::.getVignetteEncoding(text,
 			    default = if (identical(encoding, "")) NA else encoding)
         if (enc == "non-ASCII") {
-            enc <- if (nzchar(encoding)) {
-                encoding
+            poss <- grep("^[[:space:]]*@documentencoding[[:space:]]+([[:alnum:]-]+)", text, useBytes = TRUE)
+            if (length(poss)) {
+                enc <- sub("^[[:space:]]*@documentencoding[[:space:]]+([[:alnum:]-]+).*", "\\1", text[poss[1L]])
+            } else if (length(poss_html <- grep("<meta[^>]+charset=[\"']?([[:alnum:]-]+)", text, ignore.case = TRUE, useBytes = TRUE))) {
+                enc <- sub(".*<meta[^>]+charset=[\"']?([[:alnum:]-]+).*", "\\1", text[poss_html[1L]], ignore.case = TRUE)
+            } else if (nzchar(encoding)) {
+                enc <- encoding
             } else {
                 stop(sQuote(basename(file)),
                         " is not ASCII and does not declare an encoding",
@@ -325,6 +330,49 @@ SweaveSyntaxLatex$trans$code <- "\\\\begin{Scode}{\\1}"
 SweaveSyntaxLatex$trans$coderef <- "\\\\Scoderef{\\1}"
 SweaveSyntaxLatex$trans$syntaxname <- "\\\\SweaveSyntax{SweaveSyntaxLatex}"
 SweaveSyntaxLatex$trans$extension <- ".Stex"
+
+SweaveSyntaxTexinfo <- SweaveSyntaxNoweb
+SweaveSyntaxTexinfo$doc <- "^[[:space:]]*@end[[:space:]]+Scode"
+SweaveSyntaxTexinfo$code <- "^[[:space:]]*@Scode\\{?([^}]*)\\}?.*"
+SweaveSyntaxTexinfo$coderef <- "^[[:space:]]*(?:@Scoderef\\{|<<)([^}>]+)(?:\\}|>>).*"
+SweaveSyntaxTexinfo$docopt <- "^[[:space:]]*@SweaveOpts\\{([^}]*)\\}"
+SweaveSyntaxTexinfo$docexpr <- "@Sexpr\\{([^}]*)\\}"
+SweaveSyntaxTexinfo$extension <- "\\.[rsRS]?texi$"
+SweaveSyntaxTexinfo$syntaxname <- "^[[:space:]]*@SweaveSyntax\\{([^}]*)\\}"
+SweaveSyntaxTexinfo$input <- "^[[:space:]]*@SweaveInput\\{([^}]*)\\}"
+
+SweaveSyntaxTexinfo$trans$doc <- "@end Scode"
+SweaveSyntaxTexinfo$trans$code <- "@Scode{\\1}"
+SweaveSyntaxTexinfo$trans$coderef <- "@Scoderef{\\1}"
+SweaveSyntaxTexinfo$trans$docopt <- "@SweaveOpts{\\1}"
+SweaveSyntaxTexinfo$trans$docexpr <- "@Sexpr{\\1}"
+SweaveSyntaxTexinfo$trans$syntaxname <- "@SweaveSyntax{SweaveSyntaxTexinfo}"
+SweaveSyntaxTexinfo$trans$extension <- ".Stexi"
+SweaveSyntaxTexinfo$trans$input <- "@SweaveInput{\\1}"
+
+class(SweaveSyntaxTexinfo) <- "SweaveSyntax"
+
+SweaveSyntaxHtml <- SweaveSyntaxNoweb
+SweaveSyntaxHtml$doc <- "^[[:space:]]*(<!--)?[[:space:]]*end\\.rcode[[:space:]]*-->"
+SweaveSyntaxHtml$code <- "^[[:space:]]*<!--[[:space:]]*begin\\.rcode[[:space:]]*([^>-]*).*"
+SweaveSyntaxHtml$coderef <- "^[[:space:]]*(?:<!--[[:space:]]*coderef[[:space:]]+([^>]*)[[:space:]]*-->|<<([^>]+)>>)"
+SweaveSyntaxHtml$docopt <- "^[[:space:]]*<!--[[:space:]]*(?:ropts|SweaveOpts)[[:space:]]+([^>]*)[[:space:]]*-->"
+SweaveSyntaxHtml$docexpr <- "<!--[[:space:]]*rinline[[:space:]]+([^>]*)[[:space:]]*-->"
+SweaveSyntaxHtml$extension <- "\\.[rsRS]?html$"
+SweaveSyntaxHtml$syntaxname <- "^[[:space:]]*<!--[[:space:]]*SweaveSyntax[[:space:]]+([^>]*)[[:space:]]*-->"
+SweaveSyntaxHtml$input <- "^[[:space:]]*<!--[[:space:]]*(?:rinput|SweaveInput)[[:space:]]+([^>]*)[[:space:]]*-->"
+
+SweaveSyntaxHtml$trans$doc <- "end.rcode-->"
+SweaveSyntaxHtml$trans$code <- "<!--begin.rcode \\1-->"
+SweaveSyntaxHtml$trans$coderef <- "<!--coderef \\1-->"
+SweaveSyntaxHtml$trans$docopt <- "<!--SweaveOpts \\1-->"
+SweaveSyntaxHtml$trans$docexpr <- "<!--rinline \\1-->"
+SweaveSyntaxHtml$trans$syntaxname <- "<!--SweaveSyntax SweaveSyntaxHtml-->"
+SweaveSyntaxHtml$trans$extension <- ".Shtml"
+SweaveSyntaxHtml$trans$input <- "<!--SweaveInput \\1-->"
+
+class(SweaveSyntaxHtml) <- "SweaveSyntax"
+
 
 SweaveGetSyntax <- function(file)
 {
