@@ -1228,7 +1228,6 @@ escapeHTML <- function(x)
     x <- gsub('"', "&quot;", x, fixed = TRUE)
     x
 }
-
 RweaveHTMLSetup <-
     function(file, syntax, output = NULL, quiet = FALSE, debug = FALSE,
              ...)

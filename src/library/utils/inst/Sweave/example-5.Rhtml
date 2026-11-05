@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<head>
+  <title>Help for package cluster</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/texme@1.2.2"></script>
+</head><body><textarea>
+
+# Simple Sweave Example
+
+by Friedrich Leisch, Vincent Goulet and R Core Team
+
+In this simple example we embed parts of the examples from the
+`kruskal.test` help page into a HTML document:
+
+<!-- begin.rcode -->
+data(airquality, package="datasets")
+library("stats")
+kruskal.test(Ozone ~ Month, data = airquality)
+<!-- end.rcode -->
+
+The usage of the `kruskal.test()` function is
+
+<pre><code class='language-R'>kruskal.test(x, ...)
+
+## S3 method for class 'formula'
+kruskal.test(formula, data, subset, na.action, ...)
+</code></pre>
+
+
+
+The location parameter of the Ozone distribution varies
+significantly from month to month. We include a boxplot of the
+data with the following code:
+
+<!-- begin.rcode label=boxp, eval=FALSE -->
+boxplot(Ozone ~ Month, data = airquality)
+<!-- end.rcode -->
+
+The resulting plot is displayed below.
+
+<!-- begin.rcode fig=TRUE, echo=FALSE -->
+library("graphics")
+<!-- coderef boxp-->
+<!-- end.rcode -->
+
+We end this example with some gratuitous LaTeX math.
+
+$$
+X_1, X_2, \dotsc, X_n \sim N(\mu, \sigma^2)
+$$
+
+</textarea>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-r.min.js"></script>
+</body></html>
